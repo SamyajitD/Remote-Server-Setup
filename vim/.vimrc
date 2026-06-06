@@ -56,6 +56,9 @@
 " ------------------------------------------------------------------------------
 " Window / split navigation
 " ------------------------------------------------------------------------------
+" <leader>v    Open vertical split to the right.
+" <leader>h    Open horizontal split below.
+"
 " <C-h>        Move to the split on the left.
 " <C-j>        Move to the split below.
 " <C-k>        Move to the split above.
@@ -75,6 +78,13 @@
 " <C-w>v       Vertical split.
 " <C-w>q       Close current split.
 " <C-w>=       Equalize split sizes.
+"
+" ------------------------------------------------------------------------------
+" Terminal
+" ------------------------------------------------------------------------------
+" <C-/>        Toggle bottom terminal.
+" <C-_>        Same as <C-/>; useful because many terminals send Ctrl-/ as Ctrl-_.
+" <Esc><Esc>   In terminal mode, leave terminal-insert mode.
 "
 " ------------------------------------------------------------------------------
 " Buffer navigation
@@ -311,6 +321,13 @@
 " when Vim has clipboard support, so normal y/p should use system clipboard.
 "
 " ------------------------------------------------------------------------------
+" Yank highlight
+" ------------------------------------------------------------------------------
+" y{motion}    Yank normally, then briefly highlight the yanked line range.
+" yy           Yank line and briefly highlight it.
+" visual y     Yank selection and briefly highlight the selected line range.
+"
+" ------------------------------------------------------------------------------
 " Help system
 " ------------------------------------------------------------------------------
 " :help topic  Open help for a topic.
@@ -447,6 +464,11 @@ nnoremap N Nzzzv
 set splitbelow
 set splitright
 
+" LazyVim-ish splits
+
+nnoremap <leader>v :vsplit<CR>
+nnoremap <leader>h :split<CR>
+
 " LazyVim-like window movement
 nnoremap <C-h> <C-w>h
 nnoremap <C-j> <C-w>j
@@ -483,6 +505,51 @@ nnoremap <leader>x :x<CR>
 
 " Reload vimrc
 nnoremap <leader>ur :source $MYVIMRC<CR>:echo "vimrc reloaded"<CR>
+
+" ------------------------------------------------------------
+" Terminal toggle - LazyVim-ish bottom terminal
+" ------------------------------------------------------------
+function! s:ToggleTerminal() abort
+  if !has('terminal')
+    echoerr "This Vim was compiled without +terminal"
+    return
+  endif
+
+  let l:buf = get(g:, 'sd_terminal_buf', -1)
+
+  " If terminal is already visible, close its window.
+  if l:buf > 0 && bufexists(l:buf)
+    let l:winid = bufwinid(l:buf)
+    if l:winid != -1
+      call win_gotoid(l:winid)
+      close
+      return
+    endif
+  endif
+
+  " Open a small bottom terminal.
+  botright 12split
+  resize 12
+
+  if l:buf > 0 && bufexists(l:buf)
+    execute 'buffer ' . l:buf
+  else
+    terminal ++curwin
+    let g:sd_terminal_buf = bufnr('%')
+  endif
+
+  startinsert
+endfunction
+
+" Ctrl-/ is often received by terminals as Ctrl-_, so map both.
+nnoremap <silent> <C-/> :call <SID>ToggleTerminal()<CR>
+nnoremap <silent> <C-_> :call <SID>ToggleTerminal()<CR>
+
+tnoremap <silent> <C-/> <C-W>:call <SID>ToggleTerminal()<CR>
+tnoremap <silent> <C-_> <C-W>:call <SID>ToggleTerminal()<CR>
+
+" Easy way to leave terminal-insert mode.
+tnoremap <Esc><Esc> <C-\><C-N>
 
 " ------------------------------------------------------------
 " File helpers
@@ -542,6 +609,57 @@ nnoremap <leader>O O<Esc>
 nnoremap <leader>un :set number! relativenumber!<CR>
 nnoremap <leader>uw :set wrap!<CR>
 nnoremap <leader>us :set spell!<CR>
+
+" ------------------------------------------------------------
+" Highlight yanked text - native Vim
+" ------------------------------------------------------------
+if exists('##TextYankPost') && exists('*timer_start')
+  function! s:ClearYankHighlight(winid, matchid) abort
+    let l:curwin = win_getid()
+
+    if win_gotoid(a:winid)
+      silent! call matchdelete(a:matchid)
+
+      if exists('w:sd_yank_match') && w:sd_yank_match == a:matchid
+        unlet w:sd_yank_match
+      endif
+
+      call win_gotoid(l:curwin)
+    endif
+  endfunction
+
+  function! s:HighlightYank() abort
+    if v:event.operator !=# 'y'
+      return
+    endif
+
+    if exists('w:sd_yank_match')
+      silent! call matchdelete(w:sd_yank_match)
+      unlet w:sd_yank_match
+    endif
+
+    let l:start = line("'[")
+    let l:end = line("']")
+
+    if l:start <= 0 || l:end <= 0
+      return
+    endif
+
+    " Highlight the yanked line range briefly.
+    let l:pattern = '\%>' . (l:start - 1) . 'l\%<' . (l:end + 1) . 'l.*'
+    let w:sd_yank_match = matchadd('IncSearch', l:pattern, 10)
+
+    let l:winid = win_getid()
+    let l:matchid = w:sd_yank_match
+
+    call timer_start(180, {-> s:ClearYankHighlight(l:winid, l:matchid)})
+  endfunction
+
+  augroup sd_yank_highlight
+    autocmd!
+    autocmd TextYankPost * call <SID>HighlightYank()
+  augroup END
+endif
 
 " ------------------------------------------------------------
 " Folding
